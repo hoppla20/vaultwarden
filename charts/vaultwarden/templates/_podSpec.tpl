@@ -82,10 +82,16 @@ containers:
       {{- with .Values.data }}
       - name: {{ .name }}
         mountPath: {{ default "/data" .path }}
+        {{- with .subPath }}
+        subPath: {{ . }}
+        {{- end }}
       {{- end }}
       {{- with .Values.attachments }}
       - name: {{ .name }}
         mountPath: {{ default "/data/attachments" .path }}
+        {{- with .subPath }}
+        subPath: {{ . }}
+        {{- end }}
       {{- end }}
     {{- end }}
     resources:
