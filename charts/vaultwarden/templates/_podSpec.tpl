@@ -23,6 +23,9 @@ securityContext:
 initContainers:
 {{- toYaml . | nindent 2 }}
 {{- end }}
+{{- if not .Values.enableServiceLinks }}
+enableServiceLinks: false
+{{- end }}
 containers:
   - image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
     imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -31,6 +34,33 @@ containers:
       - configMapRef:
           name: {{ include "vaultwarden.fullname" . }}
     env:
+      {{- range .Values.image.extraVars }}
+      - name: {{ .key }}
+        value: {{ .value | quote }}
+      {{- end }}
+      {{- if (.Values.image.extraSecrets) }}
+      {{- range .Values.image.extraSecrets }}
+      - name: {{ .key }}
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "vaultwarden.fullname" $ }}
+            key: {{ .key }}
+      {{- end }}
+      {{- end }}
+      {{- if or (.Values.yubico.secretKey.value) (.Values.yubico.secretKey.existingSecretKey) }}
+      - name: YUBICO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: {{ default (include "vaultwarden.fullname" .) .Values.yubico.existingSecret }}
+            key: {{ default "YUBICO_SECRET_KEY" .Values.yubico.secretKey.existingSecretKey }}
+      {{- end }}
+      {{- if or (.Values.duo.sKey.value) (.Values.duo.sKey.existingSecretKey) }}
+      - name: DUO_SKEY
+        valueFrom:
+          secretKeyRef:
+            name: {{ default (include "vaultwarden.fullname" .) .Values.duo.existingSecret }}
+            key: {{ default "DUO_SKEY" .Values.duo.sKey.existingSecretKey }}
+      {{- end }}  
       {{- if or (.Values.smtp.username.value) (.Values.smtp.username.existingSecretKey )}}
       - name: SMTP_USERNAME
         valueFrom:
@@ -55,6 +85,20 @@ containers:
       - name: DISABLE_ADMIN_TOKEN
         value: "true"
       {{- end }}
+      {{- if or (.Values.pushNotifications.installationId.value) (.Values.pushNotifications.installationId.existingSecretKey )}}
+      - name: PUSH_INSTALLATION_ID
+        valueFrom:
+          secretKeyRef:
+            name: {{ default (include "vaultwarden.fullname" .) .Values.pushNotifications.existingSecret }}
+            key: {{ default "PUSH_INSTALLATION_ID" .Values.pushNotifications.installationId.existingSecretKey }}
+      {{- end }}
+      {{- if or (.Values.pushNotifications.installationKey.value) (.Values.pushNotifications.installationKey.existingSecretKey )}}
+      - name: PUSH_INSTALLATION_KEY
+        valueFrom:
+          secretKeyRef:
+            name: {{ default (include "vaultwarden.fullname" .) .Values.pushNotifications.existingSecret }}
+            key: {{ default "PUSH_INSTALLATION_KEY" .Values.pushNotifications.installationKey.existingSecretKey }}
+      {{- end }}
       {{- if ne "default" .Values.database.type }}
       - name: DATABASE_URL
         {{- if .Values.database.existingSecret }}
@@ -74,25 +118,32 @@ containers:
       - containerPort: 8080
         name: http
         protocol: TCP
-      - containerPort: {{ .Values.websocket.port }}
-        name: websocket
-        protocol: TCP
-    {{- if or (.Values.data) (.Values.attachments) }}
+    {{- if .Values.storage.existingVolumeClaim }}
+    {{- with .Values.storage.existingVolumeClaim }}
     volumeMounts:
-      {{- with .Values.data }}
+      - name: vaultwarden-data
+        mountPath: {{ default "/data" .dataPath }}
+      - name: vaultwarden-data
+        mountPath: {{ default "/data/attachments" .attachmentsPath }}
+    {{- end }}
+    {{- else }}
+    {{- if or (.Values.storage.data) (.Values.storage.attachments) }}
+    volumeMounts:
+      {{- with .Values.storage.data }}
       - name: {{ .name }}
         mountPath: {{ default "/data" .path }}
         {{- with .subPath }}
         subPath: {{ . }}
         {{- end }}
       {{- end }}
-      {{- with .Values.attachments }}
+      {{- with .Values.storage.attachments }}
       - name: {{ .name }}
         mountPath: {{ default "/data/attachments" .path }}
         {{- with .subPath }}
         subPath: {{ . }}
         {{- end }}
       {{- end }}
+    {{- end }}
     {{- end }}
     resources:
     {{- toYaml .Values.resources | nindent 6 }}
@@ -103,7 +154,7 @@ containers:
     {{- if .Values.livenessProbe.enabled }}
     livenessProbe:
       httpGet:
-        path: /alive
+        path: {{ .Values.livenessProbe.path }}
         port: http
       initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
       periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
@@ -114,7 +165,7 @@ containers:
     {{- if .Values.readinessProbe.enabled }}
     readinessProbe:
       httpGet:
-        path: /alive
+        path: {{ .Values.readinessProbe.path }}
         port: http
       initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
       periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
@@ -125,7 +176,7 @@ containers:
     {{- if .Values.startupProbe.enabled }}
     startupProbe:
       httpGet:
-        path: /alive
+        path: {{ .Values.startupProbe.path }}
         port: http
       initialDelaySeconds: {{ .Values.startupProbe.initialDelaySeconds }}
       periodSeconds: {{ .Values.startupProbe.periodSeconds }}
@@ -136,7 +187,19 @@ containers:
     {{- with .Values.sidecars }}
     {{- toYaml . | nindent 2 }}
     {{- end }}
+{{- if .Values.storage.existingVolumeClaim }}
+{{- with .Values.storage.existingVolumeClaim }}
+volumes:
+  - name: vaultwarden-data
+    persistentVolumeClaim:
+      claimName: {{ .claimName }}
+{{- end }}
+{{- end }}
 {{- if .Values.serviceAccount.create }}
 serviceAccountName: {{ .Values.serviceAccount.name }}
+{{- end }}
+{{- with .Values.image.pullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}
